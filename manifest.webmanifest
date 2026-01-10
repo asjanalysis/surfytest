@@ -1,0 +1,9 @@
+{
+  "name": "Big Wave Pocket",
+  "short_name": "BigWave",
+  "start_url": "/index.html",
+  "display": "standalone",
+  "background_color": "#05070f",
+  "theme_color": "#0a1026",
+  "icons": []
+}
