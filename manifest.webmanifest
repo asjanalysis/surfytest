@@ -1,0 +1,15 @@
+{
+  "name": "Big Wave Pocket",
+  "short_name": "Wave Pocket",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#031a33",
+  "theme_color": "#0c4ea8",
+  "icons": [
+    {
+      "src": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAABt0lEQVR4Xu2aP0sDQRSGv9kAEdhYxk6GmQmCG4gKmsx6DGIx4B0sS8E0yJjYq1WQm7cQ2QW1GXGQmQ0CkV9u7v7sWk1lV2b3Xn/9t5s7c4R3sG1bAYx4d8V1c6oH9Q0+q9Xy0wKZg7QZr7l8b0A6R2o7QdYQ7pB1o5q7v1Jw9uZB0g0xjE4GmRr8Q+Z5yW1C4fB+3WwAUN2O3hGQv3RZpV9kXbR4+J1gnxGdT2bsmg8b36+6P6q1Qf0v0OQ3jKp9uHkG0LY+U0Zt2K7sI6yVb35wQxP7xY3o+T0c2C3r5j8i7M2Hc3h9h4t0DbzXl9vG3b4Y0Hs2f9r6p7A6J4f4zv+2l8Bh2agW9XbF9x0s6X0JcVb9jwrpS6g6h0B7cK2K8p0d1n8n0O0s7a8H2r7sWjG+2g3G3F6zq3X6p8gK1q2y5q2v3c8bU9bZ8V1WgH0DkO0HkG0HkG0HkG0HkG0HkG0HkG0HkG0HkG0HkG0HkG0HkG0HkG0HkG0HkG0HkG0HkG0HkG0HkG0HkG0HkG0HkG0HkG0HkG0HkG0HkG0HkG0HkG0HkG0HlH9A0FJx9sN2jJAAAAAElFTkSuQmCC",
+      "sizes": "64x64",
+      "type": "image/png"
+    }
+  ]
+}

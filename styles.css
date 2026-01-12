@@ -1,0 +1,86 @@
+:root {
+  color-scheme: dark;
+  font-family: "Trebuchet MS", "Verdana", sans-serif;
+  background: #031a33;
+  color: #f5f5f5;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  background: radial-gradient(circle at top, #0e78b8, #031a33 70%);
+}
+
+.frame {
+  position: relative;
+  padding: 24px;
+  border-radius: 20px;
+  background: rgba(6, 24, 46, 0.7);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.35);
+  display: grid;
+  gap: 16px;
+  justify-items: center;
+}
+
+#game {
+  width: min(92vw, 880px);
+  height: auto;
+  image-rendering: pixelated;
+  border-radius: 12px;
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  background: #0f4f99;
+}
+
+.hud {
+  position: absolute;
+  top: 18px;
+  left: 18px;
+  right: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 14px;
+  text-shadow: 0 2px 6px rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+}
+
+.hud__row {
+  display: flex;
+  justify-content: space-between;
+}
+
+.hud__row--secondary {
+  font-size: 12px;
+  opacity: 0.85;
+}
+
+.controls {
+  display: flex;
+  gap: 12px;
+}
+
+button {
+  border: none;
+  border-radius: 999px;
+  padding: 8px 18px;
+  font-size: 13px;
+  background: #ffcf4a;
+  color: #1d1d1d;
+  cursor: pointer;
+  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.3);
+}
+
+button:hover {
+  transform: translateY(-1px);
+}
+
+button:active {
+  transform: translateY(1px);
+}
