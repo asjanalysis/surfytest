@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#0c4ea8" />
+    <title>Big Wave Pocket</title>
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="frame">
+      <canvas id="game" width="400" height="225" aria-label="Big Wave Pocket" role="img"></canvas>
+      <div class="hud">
+        <div class="hud__row">
+          <span id="level">Wave 1</span>
+          <span id="score">0</span>
+        </div>
+        <div class="hud__row hud__row--secondary">
+          <span id="status">Tap to drop in</span>
+        </div>
+      </div>
+      <div class="controls">
+        <button id="restart" type="button">Restart</button>
+        <button id="mute" type="button">Mute</button>
+      </div>
+    </main>
+
+    <script src="src/util.js"></script>
+    <script src="src/main.js"></script>
+    <script>
+      if ("serviceWorker" in navigator) {
+        window.addEventListener("load", () => {
+          navigator.serviceWorker.register("./sw.js");
+        });
+      }
+    </script>
+  </body>
+</html>
