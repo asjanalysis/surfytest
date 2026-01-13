@@ -1,362 +1,617 @@
-(() => {
-  const canvas = document.getElementById("game");
-  const ctx = canvas.getContext("2d");
-  const levelLabel = document.getElementById("level");
-  const scoreLabel = document.getElementById("score");
-  const statusLabel = document.getElementById("status");
-  const restartButton = document.getElementById("restart");
-  const muteButton = document.getElementById("mute");
+import { clamp, lerp, noise1, fmtInt } from "./util.js";
 
-  const WIDTH = canvas.width;
-  const HEIGHT = canvas.height;
-  const PLAYER_X = WIDTH * 0.28;
-  const GRAVITY = 0.28;
-  const TAP_IMPULSE = -3.4;
-  const WAVE_SUCTION = 0.08;
-  const SWEET_SPOT_RANGE = 10;
-  const MARGIN = 6;
+/**
+ * Big Wave Pocket Surfer (MVP)
+ * - One-button tap to pump upward
+ * - Stay inside the moving wave pocket
+ * - Survive ride duration -> celebration -> next level harder/longer
+ * - Pixel vibe: low internal resolution + nearest-neighbor scaling
+ */
 
-  const state = {
-    mode: "TITLE",
-    levelIndex: 0,
-    time: 0,
-    levelTime: 0,
-    score: 0,
-    sweetTimer: 0,
-    muted: false
-  };
+const INTERNAL_W = 384;
+const INTERNAL_H = 216;
 
-  const player = {
-    y: HEIGHT * 0.5,
-    vy: 0,
-    wobble: 0,
-    pose: 0
-  };
+const STATE = Object.freeze({
+  TITLE: "TITLE",
+  READY: "READY",
+  PLAYING: "PLAYING",
+  WIPEOUT: "WIPEOUT",
+  LEVEL_COMPLETE: "LEVEL_COMPLETE",
+});
 
-  const levels = [
-    {
-      name: "Sunrise Peel",
-      duration: 12,
-      amplitude: 32,
-      pocket: 48,
-      scroll: 1.1,
-      chop: 3.5,
-      barrelChance: 0.2,
-      barrelStrength: 0.55
-    },
-    {
-      name: "Glass Reef",
-      duration: 16,
-      amplitude: 38,
-      pocket: 42,
-      scroll: 1.25,
-      chop: 4.5,
-      barrelChance: 0.25,
-      barrelStrength: 0.6
-    },
-    {
-      name: "Thunder Bowl",
-      duration: 22,
-      amplitude: 46,
-      pocket: 36,
-      scroll: 1.4,
-      chop: 5.2,
-      barrelChance: 0.32,
-      barrelStrength: 0.68
-    }
-  ];
+class Game {
+  constructor(canvas) {
+    this.canvas = canvas;
+    this.ctx = canvas.getContext("2d", { alpha: false });
 
-  const events = {
-    barrelTimer: 0,
-    chopBurst: 0
-  };
+    // Offscreen "pixel" buffer
+    this.buf = document.createElement("canvas");
+    this.buf.width = INTERNAL_W;
+    this.buf.height = INTERNAL_H;
+    this.bctx = this.buf.getContext("2d", { alpha: false });
 
-  function currentLevel() {
-    return levels[Math.min(state.levelIndex, levels.length - 1)];
+    // HUD elements
+    this.elLevel = document.getElementById("hudLevel");
+    this.elScore = document.getElementById("hudScore");
+    this.elBest = document.getElementById("hudBest");
+    this.elCrt = document.getElementById("hudCrt");
+
+    this.centerPanel = document.getElementById("centerPanel");
+    this.wipeoutPanel = document.getElementById("wipeoutPanel");
+    this.levelPanel = document.getElementById("levelPanel");
+    this.levelTitle = document.getElementById("levelTitle");
+
+    this.btnStart = document.getElementById("btnStart");
+    this.btnRetry = document.getElementById("btnRetry");
+    this.btnCrt = document.getElementById("btnCrt");
+
+    // Settings
+    this.crtEnabled = (localStorage.getItem("bwp_crt") ?? "1") === "1";
+    this.elCrt.textContent = this.crtEnabled ? "ON" : "OFF";
+
+    // Persistent best score
+    this.best = parseInt(localStorage.getItem("bwp_best") || "0", 10) || 0;
+    this.elBest.textContent = fmtInt(this.best);
+
+    // Input state
+    this.didTap = false;
+
+    // Timing
+    this.lastTs = 0;
+
+    // Game state
+    this.state = STATE.TITLE;
+
+    // Level & run state
+    this.level = 1;
+    this.score = 0;
+    this.runTime = 0;
+
+    // Player
+    this.player = {
+      x: Math.floor(INTERNAL_W * 0.28),
+      y: Math.floor(INTERNAL_H * 0.55),
+      vy: 0,
+      radius: 6,
+      wobble: 0,
+      celebrating: false,
+      dead: false,
+    };
+
+    // Wave params (set per level)
+    this.wave = this.makeLevel(this.level);
+
+    // Bind events
+    window.addEventListener("resize", () => this.resize());
+    this.resize();
+
+    // Pointer/touch: tap anywhere to pump
+    const tapHandler = (e) => {
+      e.preventDefault();
+      this.didTap = true;
+
+      // If on title/wipeout, treat tap as start/retry
+      if (this.state === STATE.TITLE) this.startRun();
+      else if (this.state === STATE.WIPEOUT) this.startRun();
+    };
+
+    // Use pointer events (works for mouse + touch)
+    canvas.addEventListener("pointerdown", tapHandler, { passive: false });
+
+    // Buttons
+    this.btnStart.addEventListener("click", () => this.startRun());
+    this.btnRetry.addEventListener("click", () => this.startRun());
+    this.btnCrt.addEventListener("click", () => this.toggleCrt());
+
+    // Begin loop
+    requestAnimationFrame((ts) => this.loop(ts));
   }
 
-  function resetPlayer() {
-    player.y = HEIGHT * 0.5;
-    player.vy = 0;
-    player.pose = 0;
+  toggleCrt() {
+    this.crtEnabled = !this.crtEnabled;
+    localStorage.setItem("bwp_crt", this.crtEnabled ? "1" : "0");
+    this.elCrt.textContent = this.crtEnabled ? "ON" : "OFF";
   }
 
-  function startLevel() {
-    const level = currentLevel();
-    state.levelTime = 0;
-    state.mode = "READY";
-    state.time = 0;
-    events.barrelTimer = 0;
-    events.chopBurst = 0;
-    resetPlayer();
-    updateHud(level);
+  resize() {
+    // Fit the canvas to the window, then draw the pixel buffer scaled by an integer factor.
+    const dpr = Math.max(1, Math.floor(window.devicePixelRatio || 1));
+    const w = Math.floor(window.innerWidth);
+    const h = Math.floor(window.innerHeight);
+
+    this.canvas.width = w * dpr;
+    this.canvas.height = h * dpr;
+    this.ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    // Render scaling: integer scale in CSS pixels, then map to device pixels
+    const scaleX = Math.floor(w / INTERNAL_W);
+    const scaleY = Math.floor(h / INTERNAL_H);
+    this.intScale = Math.max(1, Math.min(scaleX, scaleY));
+
+    this.viewW = INTERNAL_W * this.intScale;
+    this.viewH = INTERNAL_H * this.intScale;
+
+    this.offsetX = Math.floor((w - this.viewW) / 2);
+    this.offsetY = Math.floor((h - this.viewH) / 2);
+
+    // Device-pixel transforms
+    this.dpr = dpr;
   }
 
-  function updateHud(level) {
-    levelLabel.textContent = `Wave ${state.levelIndex + 1}: ${level.name}`;
-    scoreLabel.textContent = `${Math.floor(state.score)}`;
-  }
+  makeLevel(n) {
+    // Difficulty scaling: bigger amplitude, faster scroll, longer ride, narrower pocket.
+    const baseAmp = 18;
+    const baseSpeed = 36; // pixels/sec (affects wave phase)
+    const basePocket = 54;
 
-  function waveCenter(t, x, level) {
-    const scroll = t * level.scroll;
-    const baseY = HEIGHT * 0.55;
-    const phase = (scroll + x * 0.02) * 0.6;
-    const chop = Math.sin((scroll + x * 0.03) * 1.4) * level.chop;
-    return baseY + Math.sin(phase) * level.amplitude + chop;
-  }
+    const amp = baseAmp + (n - 1) * 4.2;
+    const speed = baseSpeed + (n - 1) * 5.5;
+    const pocket = Math.max(26, basePocket - (n - 1) * 2.2);
 
-  function pocketOffsets(t, level) {
-    const barrel = events.barrelTimer > 0 ? level.barrelStrength : 0;
-    const pocket = level.pocket - barrel * 18;
-    const sway = Math.sin(t * 1.2) * 2.5;
+    const rideDuration = 10 + (n - 1) * 2.2; // seconds
+    const chop = Math.min(1.0, 0.18 + (n - 1) * 0.03);
+
+    // Barrel moments: occasional squeeze
+    const barrelChance = Math.min(0.35, 0.10 + (n - 1) * 0.02);
+
     return {
-      top: pocket * 0.45 - sway,
-      bottom: pocket * 0.55 + sway
+      amp,
+      speed,
+      pocket,
+      rideDuration,
+      chop,
+      barrelChance,
+      seed: 1337 + n * 97,
+
+      // dynamic barrel event
+      barrelTimer: 0,
+      barrelActive: false,
+      barrelCooldown: 0,
     };
   }
 
-  function waveBounds(t, x, level) {
-    const center = waveCenter(t, x, level);
-    const offsets = pocketOffsets(t, level);
-    return {
-      center,
-      upper: center - offsets.top,
-      lower: center + offsets.bottom
-    };
+  showPanels() {
+    // HUD panels
+    this.centerPanel.classList.toggle("hidden", !(this.state === STATE.TITLE));
+    this.wipeoutPanel.classList.toggle("hidden", !(this.state === STATE.WIPEOUT));
+    this.levelPanel.classList.toggle("hidden", !(this.state === STATE.LEVEL_COMPLETE));
   }
 
-  function update(dt) {
-    const level = currentLevel();
-    state.time += dt;
+  startRun() {
+    this.state = STATE.READY;
 
-    if (state.mode === "READY") {
-      player.wobble = Math.sin(state.time * 2) * 0.4;
-      return;
+    this.score = 0;
+    this.runTime = 0;
+
+    this.player.y = Math.floor(INTERNAL_H * 0.52);
+    this.player.vy = 0;
+    this.player.dead = false;
+    this.player.celebrating = false;
+    this.player.wobble = 0;
+
+    // Reset wave event state
+    this.wave.barrelTimer = 0;
+    this.wave.barrelActive = false;
+    this.wave.barrelCooldown = 1.2;
+
+    // Small delay then go
+    this.readyTimer = 0.25;
+
+    this.showPanels();
+  }
+
+  completeLevel() {
+    this.state = STATE.LEVEL_COMPLETE;
+    this.player.celebrating = true;
+
+    this.levelTitle.textContent = `Wave ${this.level} Cleared!`;
+    this.showPanels();
+
+    // Brief intermission then next level
+    this.levelCompleteTimer = 1.0;
+  }
+
+  wipeout() {
+    this.state = STATE.WIPEOUT;
+    this.player.dead = true;
+    this.showPanels();
+
+    // Best score update
+    if (this.score > this.best) {
+      this.best = Math.floor(this.score);
+      localStorage.setItem("bwp_best", String(this.best));
+      this.elBest.textContent = fmtInt(this.best);
     }
+  }
 
-    if (state.mode === "PLAYING") {
-      state.levelTime += dt;
-      const bounds = waveBounds(state.time, PLAYER_X, level);
-      const centerPull = (bounds.center - player.y) * WAVE_SUCTION;
-      player.vy += GRAVITY + centerPull;
-      player.y += player.vy;
-      player.wobble = player.vy * 0.2;
+  pump() {
+    // Pump impulse (Flappy-ish)
+    // If player is already moving up fast, don't overboost as harshly.
+    const impulse = -210;
+    this.player.vy = impulse;
+    this.player.wobble = 1.0;
 
-      if (Math.abs(player.y - bounds.center) < SWEET_SPOT_RANGE) {
-        state.sweetTimer += dt;
-        state.score += 3 * dt;
+    // Start playing on first pump from READY
+    if (this.state === STATE.READY) {
+      this.state = STATE.PLAYING;
+      this.showPanels();
+    }
+  }
+
+  waveCenterAt(x, t) {
+    // Create a traveling wave centerline. x in pixels, t in seconds.
+    // Combine a sinusoid + smooth value noise for chop.
+    const spatial = 0.018; // how fast wave varies across x
+    const temporal = this.wave.speed * 0.02; // speed -> phase progression
+    const phase = t * temporal + x * spatial;
+
+    const sinA = Math.sin(phase * 2.0);
+    const sinB = Math.sin(phase * 1.1 + 1.7);
+
+    const base = INTERNAL_H * 0.55;
+    const amp = this.wave.amp;
+
+    // Chop: small noise varying with time and x
+    const chopN = (noise1(phase * 2.2 + t * 0.7, this.wave.seed) - 0.5) * 2;
+    const chop = chopN * amp * this.wave.chop;
+
+    return base + (sinA * 0.65 + sinB * 0.35) * amp + chop;
+  }
+
+  pocketThicknessAt(t) {
+    // Base pocket thickness with optional barrel squeeze events.
+    let thick = this.wave.pocket;
+
+    // Trigger barrel events occasionally (tight section)
+    this.wave.barrelCooldown = Math.max(0, this.wave.barrelCooldown - this.dt);
+    if (!this.wave.barrelActive && this.wave.barrelCooldown <= 0) {
+      const roll = noise1(t * 1.7, this.wave.seed + 999);
+      if (roll < this.wave.barrelChance) {
+        this.wave.barrelActive = true;
+        this.wave.barrelTimer = 0.9 + noise1(t * 2.3, this.wave.seed + 555) * 0.6;
       } else {
-        state.sweetTimer = 0;
-      }
-
-      state.score += 6 * dt;
-
-      if (player.y < bounds.upper + MARGIN || player.y > bounds.lower - MARGIN) {
-        state.mode = "WIPEOUT";
-        statusLabel.textContent = "Wipeout! Tap to retry.";
-      }
-
-      if (state.levelTime >= level.duration) {
-        state.mode = "LEVEL_COMPLETE";
-        statusLabel.textContent = "Shaka! Next wave incoming.";
-      }
-
-      if (events.barrelTimer <= 0 && Math.random() < level.barrelChance * dt * 0.5) {
-        events.barrelTimer = util.randRange(1.3, 2.4);
-      }
-      if (events.chopBurst <= 0 && Math.random() < 0.4 * dt) {
-        events.chopBurst = util.randRange(0.6, 1.2);
-      }
-
-      events.barrelTimer = Math.max(0, events.barrelTimer - dt);
-      events.chopBurst = Math.max(0, events.chopBurst - dt);
-
-      updateHud(level);
-    }
-
-    if (state.mode === "WIPEOUT") {
-      player.vy += GRAVITY * 1.6;
-      player.y += player.vy;
-      player.wobble = Math.sin(state.time * 3) * 2.2;
-    }
-
-    if (state.mode === "LEVEL_COMPLETE") {
-      player.y = util.lerp(player.y, HEIGHT * 0.35, 0.03);
-      player.wobble = Math.sin(state.time * 2) * 0.6;
-      if (state.time > 1.8) {
-        state.levelIndex += 1;
-        startLevel();
-        statusLabel.textContent = "Tap to drop in";
+        this.wave.barrelCooldown = 1.0; // try again later
       }
     }
+
+    if (this.wave.barrelActive) {
+      this.wave.barrelTimer -= this.dt;
+      // Squeeze pocket substantially
+      thick *= 0.62;
+      if (this.wave.barrelTimer <= 0) {
+        this.wave.barrelActive = false;
+        this.wave.barrelCooldown = 1.25;
+      }
+    }
+
+    return thick;
   }
 
-  function drawBackground() {
-    const gradient = ctx.createLinearGradient(0, 0, 0, HEIGHT);
-    gradient.addColorStop(0, "#6bd0ff");
-    gradient.addColorStop(0.45, "#f5d47b");
-    gradient.addColorStop(0.7, "#5aa0d8");
-    gradient.addColorStop(1, "#0a3e7a");
-    ctx.fillStyle = gradient;
-    ctx.fillRect(0, 0, WIDTH, HEIGHT);
+  update(dt) {
+    this.dt = dt;
 
-    ctx.fillStyle = "rgba(255,255,255,0.5)";
-    for (let i = 0; i < 24; i += 1) {
-      const x = (i * 18 + state.time * 12) % WIDTH;
-      ctx.fillRect(x, 26 + Math.sin(i * 0.8) * 3, 10, 2);
+    // Input
+    if (this.didTap) {
+      this.didTap = false;
+      this.pump();
     }
-  }
 
-  function drawWave() {
-    const level = currentLevel();
-    const step = 8;
-    ctx.beginPath();
-    for (let x = 0; x <= WIDTH + step; x += step) {
-      const { upper } = waveBounds(state.time, x, level);
-      ctx.lineTo(x, upper);
+    // Update timers/state transitions
+    if (this.state === STATE.READY) {
+      this.readyTimer -= dt;
+      // Let player hover slightly even before first pump
     }
-    ctx.lineTo(WIDTH + step, HEIGHT + step);
-    ctx.lineTo(0, HEIGHT + step);
-    ctx.closePath();
-    ctx.fillStyle = "#0f6cb8";
-    ctx.fill();
 
-    ctx.beginPath();
-    for (let x = 0; x <= WIDTH + step; x += step) {
-      const { lower } = waveBounds(state.time, x, level);
-      ctx.lineTo(x, lower);
-    }
-    ctx.lineTo(WIDTH + step, HEIGHT + step);
-    ctx.lineTo(0, HEIGHT + step);
-    ctx.closePath();
-    ctx.fillStyle = "rgba(9, 40, 90, 0.55)";
-    ctx.fill();
+    if (this.state === STATE.LEVEL_COMPLETE) {
+      this.levelCompleteTimer -= dt;
+      if (this.levelCompleteTimer <= 0) {
+        this.level += 1;
+        this.wave = this.makeLevel(this.level);
+        this.elLevel.textContent = fmtInt(this.level);
 
-    ctx.beginPath();
-    for (let x = 0; x <= WIDTH + step; x += step) {
-      const { lower } = waveBounds(state.time, x, level);
-      const foam = lower + 4 + Math.sin((state.time * 3 + x) * 0.2) * 2;
-      ctx.lineTo(x, foam);
-    }
-    ctx.strokeStyle = "rgba(255,255,255,0.65)";
-    ctx.lineWidth = 2;
-    ctx.stroke();
+        // Autostart next wave
+        this.state = STATE.READY;
+        this.player.celebrating = false;
 
-    ctx.beginPath();
-    for (let x = 0; x <= WIDTH + step; x += step) {
-      const { upper } = waveBounds(state.time, x, level);
-      ctx.lineTo(x, upper + 6);
-    }
-    ctx.strokeStyle = "rgba(255,255,255,0.15)";
-    ctx.lineWidth = 4;
-    ctx.stroke();
+        this.score = 0;
+        this.runTime = 0;
+        this.player.y = Math.floor(INTERNAL_H * 0.52);
+        this.player.vy = 0;
+        this.readyTimer = 0.25;
 
-    if (events.barrelTimer > 0) {
-      ctx.fillStyle = "rgba(10, 28, 56, 0.35)";
-      ctx.fillRect(WIDTH * 0.5, HEIGHT * 0.12, WIDTH * 0.5, HEIGHT * 0.35);
-    }
-  }
-
-  function drawPlayer() {
-    ctx.save();
-    ctx.translate(PLAYER_X, player.y);
-    ctx.rotate(player.wobble * 0.02);
-
-    ctx.fillStyle = "#ffcf4a";
-    ctx.fillRect(-12, 6, 24, 6);
-
-    ctx.fillStyle = "#f9b54e";
-    ctx.fillRect(-5, -12, 10, 12);
-
-    ctx.fillStyle = "#f4d9b3";
-    ctx.fillRect(-2, -18, 6, 6);
-
-    ctx.fillStyle = "#0a2d4d";
-    ctx.fillRect(6, -10, 4, 6);
-    ctx.fillRect(-10, -10, 4, 6);
-
-    ctx.restore();
-
-    if (state.mode === "WIPEOUT") {
-      ctx.fillStyle = "rgba(255,255,255,0.7)";
-      ctx.beginPath();
-      ctx.arc(PLAYER_X + 18, player.y + 8, 10, 0, Math.PI * 2);
-      ctx.fill();
-    }
-  }
-
-  function drawOverlay() {
-    if (state.mode === "TITLE") {
-      ctx.fillStyle = "rgba(4, 16, 30, 0.5)";
-      ctx.fillRect(0, 0, WIDTH, HEIGHT);
-      ctx.fillStyle = "#ffffff";
-      ctx.font = "16px sans-serif";
-      ctx.fillText("BIG WAVE POCKET", 120, 96);
-      ctx.font = "10px sans-serif";
-      ctx.fillText("Tap to drop in", 150, 116);
-    }
-  }
-
-  function render() {
-    drawBackground();
-    drawWave();
-    drawPlayer();
-    drawOverlay();
-  }
-
-  function loop(timestamp) {
-    if (!state.lastTime) state.lastTime = timestamp;
-    const dt = Math.min(0.032, (timestamp - state.lastTime) / 1000);
-    state.lastTime = timestamp;
-    update(dt);
-    render();
-    requestAnimationFrame(loop);
-  }
-
-  function handleTap() {
-    if (state.mode === "TITLE") {
-      state.mode = "READY";
-      statusLabel.textContent = "Tap to drop in";
+        this.levelPanel.classList.add("hidden");
+      }
       return;
     }
-    if (state.mode === "READY") {
-      state.mode = "PLAYING";
-      statusLabel.textContent = "Hold the pocket";
+
+    if (this.state !== STATE.PLAYING && this.state !== STATE.READY) {
+      return;
     }
-    if (state.mode === "PLAYING") {
-      player.vy = TAP_IMPULSE;
-      player.pose = (player.pose + 1) % 3;
-      state.score += 2;
+
+    // Run timer only once playing
+    if (this.state === STATE.PLAYING) {
+      this.runTime += dt;
+
+      // Win condition
+      if (this.runTime >= this.wave.rideDuration) {
+        this.completeLevel();
+        return;
+      }
     }
-    if (state.mode === "WIPEOUT") {
-      state.score = 0;
-      state.levelIndex = 0;
-      startLevel();
-      statusLabel.textContent = "Tap to drop in";
+
+    // Physics
+    const gravity = 520;        // px/s^2
+    const suction = 1.25;       // pull toward pocket center
+    const maxVy = 520;
+
+    // Compute current wave pocket at player x
+    const t = this.runTime;
+    const center = this.waveCenterAt(this.player.x, t);
+    const thickness = this.pocketThicknessAt(t);
+
+    // Wave “lift” / suction toward center (keeps it surf-y and less purely “falling”)
+    const toCenter = center - this.player.y;
+
+    this.player.vy += gravity * dt;
+    this.player.vy = clamp(this.player.vy, -maxVy, maxVy);
+
+    // Apply suction as a velocity adjustment (stable and responsive)
+    this.player.vy += toCenter * suction * dt * 24;
+
+    this.player.y += this.player.vy * dt;
+
+    // Wobble decay
+    this.player.wobble = Math.max(0, this.player.wobble - dt * 2.8);
+
+    // Boundaries (lip and whitewater)
+    const margin = 6;
+    const upper = center - thickness * 0.5;
+    const lower = center + thickness * 0.5;
+
+    // Collision only once playing (READY is forgiving)
+    if (this.state === STATE.PLAYING) {
+      if (this.player.y < upper + margin || this.player.y > lower - margin) {
+        this.wipeout();
+        return;
+      }
+
+      // Scoring: time/distance + sweet spot bonus
+      const distanceScore = dt * 100; // 100 pts per second survived
+      const sweet = 1 - clamp(Math.abs(this.player.y - center) / (thickness * 0.5), 0, 1);
+      const sweetBonus = dt * 60 * sweet * sweet;
+
+      this.score += distanceScore + sweetBonus;
+      this.elScore.textContent = fmtInt(this.score);
+    }
+
+    // Update HUD
+    this.elLevel.textContent = fmtInt(this.level);
+  }
+
+  drawBackground(ctx) {
+    // Simple pixel sky gradient bands
+    ctx.fillStyle = "#0b1220";
+    ctx.fillRect(0, 0, INTERNAL_W, INTERNAL_H);
+
+    // Horizon band
+    ctx.fillStyle = "#0f1b33";
+    ctx.fillRect(0, 0, INTERNAL_W, Math.floor(INTERNAL_H * 0.52));
+
+    // Sun / glow
+    const sunX = Math.floor(INTERNAL_W * 0.78);
+    const sunY = Math.floor(INTERNAL_H * 0.22);
+    ctx.fillStyle = "#1c2b4e";
+    ctx.fillRect(sunX - 18, sunY - 10, 36, 20);
+    ctx.fillStyle = "#2b4a86";
+    ctx.fillRect(sunX - 10, sunY - 6, 20, 12);
+
+    // Distant cliffs (parallax-like)
+    ctx.fillStyle = "#0a1630";
+    for (let i = 0; i < 6; i++) {
+      const x = (i * 70 + Math.floor(this.runTime * 12)) % (INTERNAL_W + 80) - 40;
+      const y = Math.floor(INTERNAL_H * 0.48) + (i % 2) * 3;
+      ctx.fillRect(x, y, 34, 10);
+      ctx.fillRect(x + 6, y - 6, 18, 6);
     }
   }
 
-  function handleRestart() {
-    state.score = 0;
-    state.levelIndex = 0;
-    startLevel();
-    statusLabel.textContent = "Tap to drop in";
+  drawWave(ctx) {
+    const t = this.runTime;
+    const thickness = this.pocketThicknessAt(t);
+
+    // Sample the wave curves across X
+    const step = 6; // sampling step in pixels (pixel-art vibe)
+    const upperPts = [];
+    const lowerPts = [];
+
+    for (let x = 0; x <= INTERNAL_W; x += step) {
+      const c = this.waveCenterAt(x, t);
+      const u = c - thickness * 0.5;
+      const l = c + thickness * 0.5;
+
+      upperPts.push([x, u]);
+      lowerPts.push([x, l]);
+    }
+
+    // Face fill polygon
+    ctx.fillStyle = "#0c3a57";
+    ctx.beginPath();
+    ctx.moveTo(upperPts[0][0], upperPts[0][1]);
+    for (let i = 1; i < upperPts.length; i++) ctx.lineTo(upperPts[i][0], upperPts[i][1]);
+    for (let i = lowerPts.length - 1; i >= 0; i--) ctx.lineTo(lowerPts[i][0], lowerPts[i][1]);
+    ctx.closePath();
+    ctx.fill();
+
+    // Mid-tone band (dither-ish)
+    ctx.fillStyle = "#0e5672";
+    for (let x = 0; x <= INTERNAL_W; x += step) {
+      const c = this.waveCenterAt(x, t);
+      const bandY = c - thickness * 0.15;
+      ctx.fillRect(x, Math.floor(bandY), step, 2);
+    }
+
+    // Highlight band near lip
+    ctx.fillStyle = "#2aa6b6";
+    for (let x = 0; x <= INTERNAL_W; x += step) {
+      const c = this.waveCenterAt(x, t);
+      const u = c - thickness * 0.5;
+      if ((x / step) % 2 === 0) ctx.fillRect(x, Math.floor(u + 2), step, 1);
+    }
+
+    // Whitewater foam near lower boundary
+    ctx.fillStyle = "#b8f3ff";
+    for (let x = 0; x <= INTERNAL_W; x += step) {
+      const c = this.waveCenterAt(x, t);
+      const l = c + thickness * 0.5;
+      const jitter = (noise1(x * 0.05 + t * 2.6, this.wave.seed + 200) - 0.5) * 6;
+      ctx.fillRect(x, Math.floor(l - 2 + jitter * 0.2), step, 2);
+    }
   }
 
-  restartButton.addEventListener("click", handleRestart);
-  muteButton.addEventListener("click", () => {
-    state.muted = !state.muted;
-    muteButton.textContent = state.muted ? "Unmute" : "Mute";
-  });
+  drawSurfer(ctx) {
+    const p = this.player;
 
-  window.addEventListener("keydown", (event) => {
-    if (event.code === "Space") {
-      handleTap();
+    // Celebration/autopilot (moves off screen)
+    if (this.state === STATE.LEVEL_COMPLETE) {
+      p.vy = lerp(p.vy, -120, 0.08);
+      p.y += p.vy * this.dt;
+      p.x += 80 * this.dt;
+    } else {
+      // Keep surfer x fixed during play
+      p.x = Math.floor(INTERNAL_W * 0.28);
     }
-  });
 
-  canvas.addEventListener("pointerdown", handleTap);
+    // Tiny pixel surfer placeholder: board + torso + head
+    const x = Math.floor(p.x);
+    const y = Math.floor(p.y);
 
-  startLevel();
-  requestAnimationFrame(loop);
-})();
+    // Spray particles (simple)
+    if (this.state === STATE.PLAYING) {
+      ctx.fillStyle = "#b8f3ff";
+      for (let i = 0; i < 3; i++) {
+        const px = x - 10 - i * 3;
+        const py = y + 6 + (i % 2);
+        ctx.fillRect(px, py, 1, 1);
+      }
+    }
+
+    // Wipeout effect
+    if (this.state === STATE.WIPEOUT) {
+      // tumble blocks
+      ctx.fillStyle = "#b8f3ff";
+      ctx.fillRect(x - 4, y - 2, 8, 4);
+      ctx.fillStyle = "#ff4d7d";
+      ctx.fillRect(x - 2, y + 2, 4, 2);
+      ctx.fillStyle = "#0b1220";
+      ctx.fillRect(x - 1, y - 1, 2, 2);
+      return;
+    }
+
+    // Board
+    ctx.fillStyle = "#ff4d7d";
+    ctx.fillRect(x - 10, y + 6, 18, 3);
+    ctx.fillStyle = "#ff87a6";
+    ctx.fillRect(x - 6, y + 7, 10, 1);
+
+    // Body
+    const wob = p.wobble;
+    const bodyY = y + Math.floor(lerp(0, -2, wob));
+    ctx.fillStyle = "#ffd3a6"; // skin-ish
+    ctx.fillRect(x - 2, bodyY - 6, 4, 4); // head
+    ctx.fillStyle = "#42d7ff";
+    ctx.fillRect(x - 3, bodyY - 2, 6, 5); // torso
+    ctx.fillStyle = "#1c2b4e";
+    ctx.fillRect(x - 4, bodyY + 2, 8, 2); // legs
+
+    // Shaka indicator while celebrating
+    if (this.state === STATE.LEVEL_COMPLETE) {
+      ctx.fillStyle = "#b8f3ff";
+      ctx.fillRect(x + 6, bodyY - 6, 8, 2);
+      ctx.fillRect(x + 11, bodyY - 8, 2, 6);
+    }
+  }
+
+  drawCrtOverlay(ctx) {
+    if (!this.crtEnabled) return;
+
+    // Scanlines
+    ctx.fillStyle = "rgba(0,0,0,0.18)";
+    for (let y = 0; y < INTERNAL_H; y += 2) {
+      ctx.fillRect(0, y, INTERNAL_W, 1);
+    }
+
+    // Subtle vignette
+    ctx.fillStyle = "rgba(0,0,0,0.12)";
+    ctx.fillRect(0, 0, INTERNAL_W, 10);
+    ctx.fillRect(0, INTERNAL_H - 10, INTERNAL_W, 10);
+    ctx.fillRect(0, 0, 10, INTERNAL_H);
+    ctx.fillRect(INTERNAL_W - 10, 0, 10, INTERNAL_H);
+  }
+
+  render() {
+    const ctx = this.bctx;
+
+    // Pixel buffer draw
+    ctx.imageSmoothingEnabled = false;
+
+    this.drawBackground(ctx);
+    this.drawWave(ctx);
+    this.drawSurfer(ctx);
+    this.drawCrtOverlay(ctx);
+
+    // Copy buffer -> screen with integer scaling and letterboxing
+    const sctx = this.ctx;
+    sctx.imageSmoothingEnabled = false;
+
+    // Clear full canvas
+    sctx.fillStyle = "#000";
+    sctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+
+    // Compute destination rect in device pixels
+    const dx = this.offsetX * this.dpr;
+    const dy = this.offsetY * this.dpr;
+    const dw = this.viewW * this.dpr;
+    const dh = this.viewH * this.dpr;
+
+    sctx.drawImage(this.buf, dx, dy, dw, dh);
+  }
+
+  loop(ts) {
+    const t = ts / 1000;
+    const dt = this.lastTs ? Math.min(0.033, t - this.lastTs) : 0;
+    this.lastTs = t;
+
+    // State-driven panels
+    this.showPanels();
+
+    // Update
+    if (dt > 0) this.update(dt);
+
+    // Update HUD text while not playing
+    if (this.state !== STATE.PLAYING) {
+      this.elScore.textContent = fmtInt(this.score);
+      this.elLevel.textContent = fmtInt(this.level);
+    }
+
+    // Render
+    this.render();
+
+    // Title/ready text tweaks
+    if (this.state === STATE.TITLE) {
+      // keep panels visible
+    } else if (this.state === STATE.READY) {
+      // hide title panel once run starts
+      this.centerPanel.classList.add("hidden");
+    }
+
+    requestAnimationFrame((n) => this.loop(n));
+  }
+}
+
+// Boot
+const canvas = document.getElementById("screen");
+const game = new Game(canvas);
+
+// Initial UI setup
+document.getElementById("hudLevel").textContent = "1";
+document.getElementById("hudScore").textContent = "0";
