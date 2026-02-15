@@ -91,11 +91,63 @@ button:disabled {
   color: #a8faff;
 }
 
+.rgb-keyboard {
+  position: absolute;
+  left: 50%;
+  bottom: 1.2rem;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.75rem;
+  border-radius: 1rem;
+  border: 1px solid rgb(150 237 255 / 28%);
+  background: linear-gradient(160deg, rgb(8 8 20 / 85%), rgb(20 18 44 / 58%));
+  box-shadow: 0 0 30px rgb(43 223 255 / 18%);
+  backdrop-filter: blur(8px);
+  pointer-events: none;
+}
+
+.key-row {
+  display: flex;
+  justify-content: center;
+  gap: 0.35rem;
+}
+
+.key {
+  --key-h: 0.56;
+  --key-s: 92%;
+  --key-l: 56%;
+  --key-glow: 0.45;
+  width: 2.1rem;
+  height: 2.1rem;
+  border-radius: 0.45rem;
+  display: grid;
+  place-items: center;
+  font-size: 0.76rem;
+  font-weight: 700;
+  color: #ecfaff;
+  border: 1px solid hsl(var(--key-h) 95% 75% / 65%);
+  background:
+    linear-gradient(155deg, hsl(var(--key-h) var(--key-s) calc(var(--key-l) + 16%) / 68%), hsl(calc(var(--key-h) + 0.05) var(--key-s) calc(var(--key-l) - 14%) / 50%)),
+    rgb(8 10 28 / 88%);
+  box-shadow:
+    0 0 calc(10px + var(--key-glow) * 22px) hsl(var(--key-h) 98% 60% / calc(0.25 + var(--key-glow) * 0.65)),
+    inset 0 0 10px hsl(var(--key-h) 95% 68% / 50%);
+  transition: background 120ms linear, box-shadow 120ms linear, transform 120ms linear;
+}
+
 @media (width <= 700px) {
   .hud {
     right: 1rem;
     left: 1rem;
     top: 1rem;
     max-width: none;
+  }
+
+  .rgb-keyboard {
+    transform: translateX(-50%) scale(0.9);
+    transform-origin: bottom center;
+    bottom: 0.5rem;
   }
 }

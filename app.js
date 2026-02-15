@@ -4,6 +4,9 @@ const canvas = document.querySelector("#scene");
 const startBtn = document.querySelector("#startBtn");
 const statusText = document.querySelector("#status");
 
+const keyboardKeys = Array.from(document.querySelectorAll(".key"));
+const keyboardState = keyboardKeys.map(() => ({ glow: 0.25 }));
+
 const scene = new THREE.Scene();
 scene.fog = new THREE.FogExp2(0x04000f, 0.03);
 
@@ -180,10 +183,34 @@ const getAudioStrength = () => {
 const clock = new THREE.Clock();
 const tempColor = new THREE.Color();
 
+function updateKeyboard(t, pulse) {
+  if (!keyboardKeys.length) {
+    return;
+  }
+
+  for (let i = 0; i < keyboardKeys.length; i += 1) {
+    const freqBand = frequencyData ? frequencyData[(i * 7) % frequencyData.length] / 255 : 0;
+    const shimmer = (Math.sin(t * 2.4 + i * 0.55) + 1) * 0.5;
+    const intensity = Math.min(1, freqBand * 1.25 + pulse * 0.55 + shimmer * 0.35);
+
+    const state = keyboardState[i];
+    state.glow += (intensity - state.glow) * 0.24;
+
+    const hue = (0.56 + t * 0.18 + i * 0.032 + state.glow * 0.2) % 1;
+    const lightness = 42 + state.glow * 35;
+
+    const key = keyboardKeys[i];
+    key.style.setProperty("--key-h", hue.toFixed(3));
+    key.style.setProperty("--key-l", `${lightness.toFixed(1)}%`);
+    key.style.setProperty("--key-glow", state.glow.toFixed(3));
+  }
+}
+
 function animate() {
   requestAnimationFrame(animate);
   const t = clock.getElapsedTime();
   const pulse = getAudioStrength();
+  updateKeyboard(t, pulse);
 
   const mainPosition = mainWave.geometry.attributes.position;
   const glowPosition = glowWave.geometry.attributes.position;
@@ -277,7 +304,7 @@ async function setupMicrophone() {
 
     source.connect(analyser);
 
-    statusText.textContent = "Microphone active. Make some noise!";
+    statusText.textContent = "Microphone active. Make some noise and watch the RGB keyboard react.";
     startBtn.textContent = "Microphone Enabled";
   } catch (error) {
     const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
