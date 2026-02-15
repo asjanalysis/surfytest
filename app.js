@@ -3,12 +3,10 @@ import * as THREE from "https://unpkg.com/three@0.162.0/build/three.module.js";
 const canvas = document.querySelector("#scene");
 const startBtn = document.querySelector("#startBtn");
 const statusText = document.querySelector("#status");
-
-const keyboardKeys = Array.from(document.querySelectorAll(".key"));
-const keyboardState = keyboardKeys.map(() => ({ glow: 0.25 }));
+const titleText = document.querySelector("#title");
 
 const scene = new THREE.Scene();
-scene.fog = new THREE.FogExp2(0x04000f, 0.03);
+scene.fog = new THREE.FogExp2(0x13062a, 0.028);
 
 const camera = new THREE.PerspectiveCamera(58, window.innerWidth / window.innerHeight, 0.1, 120);
 camera.position.set(0, 4.1, 9.4);
@@ -18,19 +16,19 @@ renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.2;
+renderer.toneMappingExposure = 1.28;
 
-scene.add(new THREE.AmbientLight(0x3b4f8a, 0.52));
+scene.add(new THREE.AmbientLight(0x5a4ea8, 0.58));
 
-const keyLight = new THREE.PointLight(0xff4de5, 10, 38, 2);
+const keyLight = new THREE.PointLight(0xff3fcb, 12, 38, 2);
 keyLight.position.set(4, 6, 6);
 scene.add(keyLight);
 
-const fillLight = new THREE.PointLight(0x23f2ff, 11, 45, 2);
+const fillLight = new THREE.PointLight(0x16f8ff, 12, 45, 2);
 fillLight.position.set(-8, 2, -5);
 scene.add(fillLight);
 
-const rimLight = new THREE.PointLight(0x8448ff, 9, 35, 2);
+const rimLight = new THREE.PointLight(0x8d50ff, 10, 35, 2);
 rimLight.position.set(0, -1, 8);
 scene.add(rimLight);
 
@@ -48,14 +46,14 @@ mainGeometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
 const mainWave = new THREE.Mesh(
   mainGeometry,
   new THREE.MeshPhysicalMaterial({
-    color: 0x4700b6,
+    color: 0x5f00de,
     wireframe: true,
-    emissive: 0x3117ff,
-    emissiveIntensity: 2.3,
-    metalness: 0.25,
-    roughness: 0.27,
+    emissive: 0x4a1eff,
+    emissiveIntensity: 2.4,
+    metalness: 0.2,
+    roughness: 0.24,
     clearcoat: 1,
-    clearcoatRoughness: 0.2,
+    clearcoatRoughness: 0.18,
     vertexColors: true,
     transparent: true,
     opacity: 0.95,
@@ -67,11 +65,11 @@ scene.add(mainWave);
 const glowWave = new THREE.Mesh(
   createWaveGeometry(),
   new THREE.MeshStandardMaterial({
-    color: 0x1fd8ff,
-    emissive: 0x19e2ff,
-    emissiveIntensity: 2,
+    color: 0x08e8ff,
+    emissive: 0x1af7ff,
+    emissiveIntensity: 2.2,
     transparent: true,
-    opacity: 0.18,
+    opacity: 0.19,
     side: THREE.DoubleSide,
     blending: THREE.AdditiveBlending,
   }),
@@ -83,11 +81,11 @@ scene.add(glowWave);
 const veilWave = new THREE.Mesh(
   createWaveGeometry(),
   new THREE.MeshStandardMaterial({
-    color: 0xff40cc,
-    emissive: 0xff4ad8,
-    emissiveIntensity: 0.9,
+    color: 0xff2db8,
+    emissive: 0xff37c7,
+    emissiveIntensity: 1.1,
     transparent: true,
-    opacity: 0.11,
+    opacity: 0.12,
     side: THREE.DoubleSide,
     blending: THREE.AdditiveBlending,
   }),
@@ -110,7 +108,7 @@ for (let i = 0; i < starCount; i += 1) {
   starPositions[i3 + 1] = Math.random() * ySpread - 6;
   starPositions[i3 + 2] = (Math.random() - 0.5) * spread;
 
-  color.setHSL(0.5 + Math.random() * 0.35, 0.9, 0.66);
+  color.setHSL(0.48 + Math.random() * 0.45, 0.92, 0.68);
   starColors[i3] = color.r;
   starColors[i3 + 1] = color.g;
   starColors[i3 + 2] = color.b;
@@ -183,34 +181,10 @@ const getAudioStrength = () => {
 const clock = new THREE.Clock();
 const tempColor = new THREE.Color();
 
-function updateKeyboard(t, pulse) {
-  if (!keyboardKeys.length) {
-    return;
-  }
-
-  for (let i = 0; i < keyboardKeys.length; i += 1) {
-    const freqBand = frequencyData ? frequencyData[(i * 7) % frequencyData.length] / 255 : 0;
-    const shimmer = (Math.sin(t * 2.4 + i * 0.55) + 1) * 0.5;
-    const intensity = Math.min(1, freqBand * 1.25 + pulse * 0.55 + shimmer * 0.35);
-
-    const state = keyboardState[i];
-    state.glow += (intensity - state.glow) * 0.24;
-
-    const hue = (0.56 + t * 0.18 + i * 0.032 + state.glow * 0.2) % 1;
-    const lightness = 42 + state.glow * 35;
-
-    const key = keyboardKeys[i];
-    key.style.setProperty("--key-h", hue.toFixed(3));
-    key.style.setProperty("--key-l", `${lightness.toFixed(1)}%`);
-    key.style.setProperty("--key-glow", state.glow.toFixed(3));
-  }
-}
-
 function animate() {
   requestAnimationFrame(animate);
   const t = clock.getElapsedTime();
   const pulse = getAudioStrength();
-  updateKeyboard(t, pulse);
 
   const mainPosition = mainWave.geometry.attributes.position;
   const glowPosition = glowWave.geometry.attributes.position;
@@ -235,8 +209,9 @@ function animate() {
     glowPosition.array[i3 + 2] = basePositions[i3 + 2] + z * 1.08 + Math.sin(t * 4 + radial) * 0.06;
     veilPosition.array[i3 + 2] = basePositions[i3 + 2] + z * 0.85 - Math.cos(t * 3.2 + radial * 1.2) * 0.08;
 
-    const hue = (0.56 + radial * 0.018 + freqBand * 0.38 + Math.sin(t * 0.9 + radial) * 0.12) % 1;
-    tempColor.setHSL(hue, 0.95, 0.55 + freqBand * 0.12);
+    const hueSwing = Math.sin(t * 0.9 + radial * 1.3) * 0.08;
+    const hue = (0.83 + hueSwing + freqBand * 0.16 + radial * 0.006) % 1;
+    tempColor.setHSL(hue, 0.95, 0.57 + freqBand * 0.11);
     colorAttribute.array[i3] = tempColor.r;
     colorAttribute.array[i3 + 1] = tempColor.g;
     colorAttribute.array[i3 + 2] = tempColor.b;
@@ -254,13 +229,20 @@ function animate() {
   stars.rotation.x = Math.sin(t * 0.2) * 0.06;
   stars.position.y = Math.sin(t * 0.5) * 0.42;
 
-  keyLight.intensity = 8 + pulse * 10;
-  fillLight.intensity = 8.5 + pulse * 8;
-  rimLight.intensity = 6 + pulse * 9;
+  keyLight.intensity = 9 + pulse * 11;
+  fillLight.intensity = 9 + pulse * 9;
+  rimLight.intensity = 7 + pulse * 10;
 
-  keyLight.color.setHSL((0.89 + t * 0.06) % 1, 0.85, 0.58);
-  fillLight.color.setHSL((0.52 + t * 0.09) % 1, 0.9, 0.6);
-  rimLight.color.setHSL((0.74 + t * 0.08) % 1, 0.85, 0.56);
+  keyLight.color.setHSL((0.9 + Math.sin(t * 0.35) * 0.04 + pulse * 0.05) % 1, 0.86, 0.58);
+  fillLight.color.setHSL((0.5 + Math.sin(t * 0.45 + 1.2) * 0.05 + pulse * 0.06) % 1, 0.92, 0.6);
+  rimLight.color.setHSL((0.76 + Math.cos(t * 0.38 + 0.8) * 0.04 + pulse * 0.06) % 1, 0.88, 0.56);
+
+  const textHue = (318 + Math.sin(t * 0.9) * 16 + pulse * 42 + 360) % 360;
+  const accentHue = (188 + Math.cos(t * 1.05 + 0.7) * 22 + pulse * 52 + 360) % 360;
+  titleText.style.color = `hsl(${textHue.toFixed(1)} 100% 74%)`;
+  titleText.style.textShadow = `0 0 ${14 + pulse * 18}px hsl(${textHue.toFixed(1)} 100% 62% / 75%)`;
+  statusText.style.color = `hsl(${accentHue.toFixed(1)} 95% 76%)`;
+  startBtn.style.boxShadow = `0 0 ${14 + pulse * 26}px hsl(${accentHue.toFixed(1)} 95% 58% / 60%)`;
 
   const orbit = t * 0.18;
   camera.position.x = Math.sin(orbit) * 1.6;
@@ -304,7 +286,7 @@ async function setupMicrophone() {
 
     source.connect(analyser);
 
-    statusText.textContent = "Microphone active. Make some noise and watch the RGB keyboard react.";
+    statusText.textContent = "Microphone active. Sound now drives the aurora wave and text glow.";
     startBtn.textContent = "Microphone Enabled";
   } catch (error) {
     const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
