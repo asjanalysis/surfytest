@@ -88,6 +88,36 @@ scene.add(stars);
 let analyser;
 let frequencyData;
 let audioContext;
+const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+
+const legacyGetUserMedia = (constraints) =>
+  new Promise((resolve, reject) => {
+    const getUserMedia = navigator.getUserMedia || navigator.webkitGetUserMedia || navigator.mozGetUserMedia;
+
+    if (!getUserMedia) {
+      reject(new Error("getUserMedia is not supported in this browser."));
+      return;
+    }
+
+    getUserMedia.call(navigator, constraints, resolve, reject);
+  });
+
+const requestMicrophoneStream = async () => {
+  const constraints = {
+    audio: {
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: true,
+    },
+    video: false,
+  };
+
+  if (navigator.mediaDevices?.getUserMedia) {
+    return navigator.mediaDevices.getUserMedia(constraints);
+  }
+
+  return legacyGetUserMedia(constraints);
+};
 
 const getAudioStrength = () => {
   if (!analyser || !frequencyData) {
@@ -159,9 +189,23 @@ async function setupMicrophone() {
   statusText.textContent = "Requesting microphone permission…";
 
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    if (!window.isSecureContext) {
+      throw new Error("Microphone access requires HTTPS (or localhost). Open this page from a secure origin.");
+    }
 
-    audioContext = new AudioContext();
+    const stream = await requestMicrophoneStream();
+    if (!AudioContextClass) {
+      throw new Error("Web Audio API is unavailable in this browser.");
+    }
+
+    if (!audioContext) {
+      audioContext = new AudioContextClass();
+    }
+
+    if (audioContext.state === "suspended") {
+      await audioContext.resume();
+    }
+
     const source = audioContext.createMediaStreamSource(stream);
 
     analyser = audioContext.createAnalyser();
@@ -174,7 +218,10 @@ async function setupMicrophone() {
     statusText.textContent = "Microphone active. Make some noise!";
     startBtn.textContent = "Microphone Enabled";
   } catch (error) {
-    statusText.textContent = "Microphone unavailable. Please allow access and refresh.";
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+    const iosHint = isIOS ? " On iPhone, use Safari and ensure microphone permission is enabled for this site." : "";
+
+    statusText.textContent = `Microphone unavailable. Please allow access and reload.${iosHint}`;
     startBtn.textContent = "Retry Microphone";
     startBtn.disabled = false;
     console.error("Microphone setup failed", error);
