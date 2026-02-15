@@ -1,0 +1,93 @@
+:root {
+  color-scheme: dark;
+  font-family: "Trebuchet MS", "Segoe UI", sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: radial-gradient(circle at top, #120025, #03010b 50%, #000);
+  color: #d3f7ff;
+}
+
+main {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+}
+
+#scene {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.hud {
+  position: absolute;
+  top: 1.25rem;
+  left: 1.25rem;
+  max-width: 26rem;
+  padding: 1rem 1.2rem;
+  background: linear-gradient(145deg, rgb(7 8 32 / 82%), rgb(18 11 39 / 58%));
+  border: 1px solid rgb(149 237 255 / 32%);
+  border-radius: 1rem;
+  backdrop-filter: blur(8px);
+  box-shadow: 0 0 32px rgb(36 238 255 / 23%);
+}
+
+h1 {
+  margin: 0 0 0.5rem;
+  font-size: 1.3rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+p {
+  margin: 0.4rem 0;
+  font-size: 0.95rem;
+  line-height: 1.35;
+}
+
+button {
+  margin-top: 0.7rem;
+  width: 100%;
+  border: 0;
+  padding: 0.75rem 1rem;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #25e4ff, #ff2dde, #7c52ff);
+  color: #020312;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 0 18px rgb(222 45 255 / 55%);
+}
+
+button:disabled {
+  cursor: progress;
+  filter: grayscale(0.3) brightness(0.88);
+}
+
+#status {
+  margin-top: 0.6rem;
+  color: #9af7ff;
+}
+
+@media (width <= 700px) {
+  .hud {
+    right: 1rem;
+    left: 1rem;
+    top: 1rem;
+    max-width: none;
+  }
+}
