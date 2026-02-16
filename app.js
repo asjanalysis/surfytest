@@ -1,7 +1,8 @@
 import * as THREE from "https://unpkg.com/three@0.162.0/build/three.module.js";
 
 const canvas = document.querySelector("#scene");
-const startBtn = document.querySelector("#startBtn");
+const microphoneBtn = document.querySelector("#microphoneBtn");
+const deviceAudioBtn = document.querySelector("#deviceAudioBtn");
 const statusText = document.querySelector("#status");
 const titleText = document.querySelector("#title");
 
@@ -133,6 +134,9 @@ scene.add(stars);
 let analyser;
 let frequencyData;
 let audioContext;
+let activeAudioStream;
+let activeSourceNode;
+let activeInputType;
 const AudioContextClass = window.AudioContext || window.webkitAudioContext;
 
 const legacyGetUserMedia = (constraints) =>
@@ -162,6 +166,43 @@ const requestMicrophoneStream = async () => {
   }
 
   return legacyGetUserMedia(constraints);
+};
+
+const requestDeviceAudioStream = async () => {
+  if (!navigator.mediaDevices?.getDisplayMedia) {
+    throw new Error("Display capture is not supported in this browser.");
+  }
+
+  return navigator.mediaDevices.getDisplayMedia({
+    video: true,
+    audio: {
+      echoCancellation: false,
+      noiseSuppression: false,
+      autoGainControl: false,
+    },
+  });
+};
+
+const stopActiveStream = () => {
+  if (activeSourceNode) {
+    activeSourceNode.disconnect();
+    activeSourceNode = undefined;
+  }
+
+  if (activeAudioStream) {
+    activeAudioStream.getTracks().forEach((track) => track.stop());
+    activeAudioStream = undefined;
+  }
+};
+
+const setControlBusyState = (isBusy) => {
+  microphoneBtn.disabled = isBusy;
+  deviceAudioBtn.disabled = isBusy;
+};
+
+const setActiveButtonText = () => {
+  microphoneBtn.textContent = activeInputType === "microphone" ? "Microphone Enabled" : "Enable Microphone";
+  deviceAudioBtn.textContent = activeInputType === "device" ? "Device Audio Active" : "Capture Device Audio";
 };
 
 const getAudioStrength = () => {
@@ -242,7 +283,9 @@ function animate() {
   titleText.style.color = `hsl(${textHue.toFixed(1)} 100% 74%)`;
   titleText.style.textShadow = `0 0 ${14 + pulse * 18}px hsl(${textHue.toFixed(1)} 100% 62% / 75%)`;
   statusText.style.color = `hsl(${accentHue.toFixed(1)} 95% 76%)`;
-  startBtn.style.boxShadow = `0 0 ${14 + pulse * 26}px hsl(${accentHue.toFixed(1)} 95% 58% / 60%)`;
+
+  microphoneBtn.style.boxShadow = activeInputType === "microphone" ? `0 0 ${14 + pulse * 26}px hsl(${accentHue.toFixed(1)} 95% 58% / 60%)` : "";
+  deviceAudioBtn.style.boxShadow = activeInputType === "device" ? `0 0 ${14 + pulse * 26}px hsl(${accentHue.toFixed(1)} 95% 58% / 60%)` : "";
 
   const orbit = t * 0.18;
   camera.position.x = Math.sin(orbit) * 1.6;
@@ -255,16 +298,19 @@ function animate() {
 
 animate();
 
-async function setupMicrophone() {
-  startBtn.disabled = true;
-  statusText.textContent = "Requesting microphone permission…";
+async function setupAudioSource(type) {
+  const isMicrophone = type === "microphone";
+
+  setControlBusyState(true);
+  statusText.textContent = isMicrophone ? "Requesting microphone permission…" : "Select a screen/tab and enable audio sharing…";
 
   try {
     if (!window.isSecureContext) {
-      throw new Error("Microphone access requires HTTPS (or localhost). Open this page from a secure origin.");
+      throw new Error("Audio capture requires HTTPS (or localhost). Open this page from a secure origin.");
     }
 
-    const stream = await requestMicrophoneStream();
+    const stream = isMicrophone ? await requestMicrophoneStream() : await requestDeviceAudioStream();
+
     if (!AudioContextClass) {
       throw new Error("Web Audio API is unavailable in this browser.");
     }
@@ -277,30 +323,58 @@ async function setupMicrophone() {
       await audioContext.resume();
     }
 
-    const source = audioContext.createMediaStreamSource(stream);
+    if (!isMicrophone && !stream.getAudioTracks().length) {
+      stream.getTracks().forEach((track) => track.stop());
+      throw new Error("No audio track was shared.");
+    }
 
+    stopActiveStream();
+
+    activeAudioStream = stream;
+    activeInputType = type;
+    setActiveButtonText();
+
+    activeSourceNode = audioContext.createMediaStreamSource(stream);
     analyser = audioContext.createAnalyser();
     analyser.fftSize = 512;
     analyser.smoothingTimeConstant = 0.78;
     frequencyData = new Uint8Array(analyser.frequencyBinCount);
+    activeSourceNode.connect(analyser);
 
-    source.connect(analyser);
+    const activeLabel = isMicrophone ? "Microphone" : "Device audio";
+    statusText.textContent = `${activeLabel} active. Sound now drives the aurora wave and text glow.`;
 
-    statusText.textContent = "Microphone active. Sound now drives the aurora wave and text glow.";
-    startBtn.textContent = "Microphone Enabled";
+    stream.getTracks().forEach((track) => {
+      track.addEventListener("ended", () => {
+        if (activeAudioStream === stream) {
+          stopActiveStream();
+          activeInputType = undefined;
+          setActiveButtonText();
+          statusText.textContent = `${activeLabel} capture ended. Choose an input to start again.`;
+        }
+      });
+    });
   } catch (error) {
     const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
-    const iosHint = isIOS ? " On iPhone, use Safari and ensure microphone permission is enabled for this site." : "";
+    const iosHint = isIOS ? " On iPhone, use Safari and verify audio permissions for this site." : "";
+    const modeHint = isMicrophone
+      ? "Please allow microphone access and try again."
+      : "Share a tab/screen with audio enabled, then try again.";
 
-    statusText.textContent = `Microphone unavailable. Please allow access and reload.${iosHint}`;
-    startBtn.textContent = "Retry Microphone";
-    startBtn.disabled = false;
-    console.error("Microphone setup failed", error);
+    statusText.textContent = `${isMicrophone ? "Microphone" : "Device audio"} unavailable. ${modeHint}${iosHint}`;
+    console.error(`${isMicrophone ? "Microphone" : "Device audio"} setup failed`, error);
+  } finally {
+    setControlBusyState(false);
+    setActiveButtonText();
   }
 }
 
-startBtn.addEventListener("click", () => {
-  setupMicrophone();
+microphoneBtn.addEventListener("click", () => {
+  setupAudioSource("microphone");
+});
+
+deviceAudioBtn.addEventListener("click", () => {
+  setupAudioSource("device");
 });
 
 window.addEventListener("resize", () => {
