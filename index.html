@@ -12,9 +12,12 @@
       <section class="hud">
         <h1 id="title">Aurora Sound Wave</h1>
         <p>
-          Grant microphone access and watch the aurora palette oscillate with your voice.
+          Connect a microphone or capture tab/system audio to drive the aurora palette with any sound source.
         </p>
-        <button id="startBtn">Enable Microphone</button>
+        <div class="controls" role="group" aria-label="Audio input options">
+          <button id="microphoneBtn">Enable Microphone</button>
+          <button id="deviceAudioBtn">Capture Device Audio</button>
+        </div>
         <p id="status" role="status" aria-live="polite">Waiting to start…</p>
       </section>
     </main>
