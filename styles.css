@@ -23,6 +23,7 @@ main {
   position: relative;
   width: 100vw;
   height: 100vh;
+  height: 100dvh;
   overflow: hidden;
 }
 
@@ -34,13 +35,14 @@ main {
 
 .hud {
   position: absolute;
-  top: 1.25rem;
-  left: 1.25rem;
+  top: max(1.25rem, env(safe-area-inset-top));
+  left: max(1.25rem, env(safe-area-inset-left));
   max-width: 27rem;
   padding: 1rem 1.2rem;
   background: linear-gradient(145deg, rgb(12 8 32 / 82%), rgb(34 8 54 / 55%));
   border: 1px solid rgb(126 240 255 / 40%);
   border-radius: 1rem;
+  -webkit-backdrop-filter: blur(10px) saturate(1.2);
   backdrop-filter: blur(10px) saturate(1.2);
   box-shadow:
     0 0 35px rgb(38 236 255 / 18%),
@@ -78,13 +80,23 @@ button {
   text-transform: uppercase;
   letter-spacing: 0.06em;
   cursor: pointer;
+  touch-action: manipulation;
   transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease;
 }
 
-button:hover {
+button:not(:disabled):hover {
   transform: translateY(-1px);
   box-shadow: 0 0 22px rgb(218 44 255 / 58%);
   filter: brightness(1.06);
+}
+
+button:focus-visible {
+  outline: 3px solid #fff;
+  outline-offset: 3px;
+}
+
+button[aria-pressed="true"] {
+  filter: brightness(1.12) saturate(1.15);
 }
 
 button:disabled {
@@ -94,14 +106,21 @@ button:disabled {
 
 #status {
   margin-top: 0.6rem;
+  min-height: 2.6em;
   color: #a8faff;
 }
 
 @media (width <= 700px) {
   .hud {
-    right: 1rem;
-    left: 1rem;
-    top: 1rem;
+    top: max(1rem, env(safe-area-inset-top));
+    right: max(1rem, env(safe-area-inset-right));
+    left: max(1rem, env(safe-area-inset-left));
     max-width: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  button {
+    transition: none;
   }
 }

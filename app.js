@@ -5,6 +5,8 @@ const microphoneBtn = document.querySelector("#microphoneBtn");
 const deviceAudioBtn = document.querySelector("#deviceAudioBtn");
 const statusText = document.querySelector("#status");
 const titleText = document.querySelector("#title");
+const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+const targetFrameInterval = 1000 / (prefersReducedMotion ? 24 : 60);
 
 const scene = new THREE.Scene();
 scene.fog = new THREE.FogExp2(0x13062a, 0.028);
@@ -36,13 +38,14 @@ scene.add(rimLight);
 const createWaveGeometry = () => {
   const geometry = new THREE.PlaneGeometry(14, 14, 180, 180);
   geometry.rotateX(-Math.PI / 2.9);
+  geometry.attributes.position.setUsage(THREE.DynamicDrawUsage);
   return geometry;
 };
 
 const mainGeometry = createWaveGeometry();
 const basePositions = Float32Array.from(mainGeometry.attributes.position.array);
 const colors = new Float32Array(mainGeometry.attributes.position.count * 3);
-mainGeometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+mainGeometry.setAttribute("color", new THREE.BufferAttribute(colors, 3).setUsage(THREE.DynamicDrawUsage));
 
 const mainWave = new THREE.Mesh(
   mainGeometry,
@@ -138,6 +141,13 @@ let activeAudioStream;
 let activeSourceNode;
 let activeInputType;
 const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+const microphoneSupported = Boolean(
+  navigator.mediaDevices?.getUserMedia ||
+    navigator.getUserMedia ||
+    navigator.webkitGetUserMedia ||
+    navigator.mozGetUserMedia,
+);
+const deviceAudioSupported = Boolean(navigator.mediaDevices?.getDisplayMedia);
 
 const legacyGetUserMedia = (constraints) =>
   new Promise((resolve, reject) => {
@@ -183,26 +193,72 @@ const requestDeviceAudioStream = async () => {
   });
 };
 
+const getAudioErrorMessage = (error, isMicrophone) => {
+  const activeLabel = isMicrophone ? "Microphone" : "Device audio";
+
+  if (!window.isSecureContext) {
+    return `${activeLabel} unavailable. Audio capture requires HTTPS or localhost.`;
+  }
+
+  if (error?.name === "NotAllowedError") {
+    return `${activeLabel} permission was denied. Allow access and try again.`;
+  }
+
+  if (error?.name === "NotFoundError") {
+    return `${activeLabel} unavailable because no compatible audio source was found.`;
+  }
+
+  if (error?.name === "NotReadableError" || error?.name === "AbortError") {
+    return `${activeLabel} could not start because the selected source is unavailable or already in use.`;
+  }
+
+  if (!isMicrophone && error?.message?.includes("audio track")) {
+    return "Device audio unavailable. Select a tab or screen and enable audio sharing in the browser picker.";
+  }
+
+  return isMicrophone
+    ? "Microphone unavailable. Allow microphone access and try again."
+    : "Device audio unavailable. Share a tab or screen with audio enabled, then try again.";
+};
+
+const stopStream = (stream) => {
+  stream?.getTracks().forEach((track) => track.stop());
+};
+
 const stopActiveStream = () => {
   if (activeSourceNode) {
     activeSourceNode.disconnect();
     activeSourceNode = undefined;
   }
 
-  if (activeAudioStream) {
-    activeAudioStream.getTracks().forEach((track) => track.stop());
-    activeAudioStream = undefined;
-  }
+  stopStream(activeAudioStream);
+  activeAudioStream = undefined;
+  activeInputType = undefined;
+  analyser = undefined;
+  frequencyData = undefined;
 };
 
 const setControlBusyState = (isBusy) => {
-  microphoneBtn.disabled = isBusy;
-  deviceAudioBtn.disabled = isBusy;
+  microphoneBtn.disabled = isBusy || !microphoneSupported;
+  deviceAudioBtn.disabled = isBusy || !deviceAudioSupported;
 };
 
 const setActiveButtonText = () => {
-  microphoneBtn.textContent = activeInputType === "microphone" ? "Microphone Enabled" : "Enable Microphone";
-  deviceAudioBtn.textContent = activeInputType === "device" ? "Device Audio Active" : "Capture Device Audio";
+  const microphoneActive = activeInputType === "microphone";
+  const deviceAudioActive = activeInputType === "device";
+
+  microphoneBtn.textContent = microphoneActive
+    ? "Stop Microphone"
+    : microphoneSupported
+      ? "Enable Microphone"
+      : "Microphone Unsupported";
+  deviceAudioBtn.textContent = deviceAudioActive
+    ? "Stop Device Audio"
+    : deviceAudioSupported
+      ? "Capture Device Audio"
+      : "Device Audio Unsupported";
+  microphoneBtn.setAttribute("aria-pressed", String(microphoneActive));
+  deviceAudioBtn.setAttribute("aria-pressed", String(deviceAudioActive));
 };
 
 const getAudioStrength = () => {
@@ -221,10 +277,22 @@ const getAudioStrength = () => {
 
 const clock = new THREE.Clock();
 const tempColor = new THREE.Color();
+let lastFrameTime = 0;
+let renderedFrameCount = 0;
 
-function animate() {
+function animate(frameTime = 0) {
   requestAnimationFrame(animate);
-  const t = clock.getElapsedTime();
+
+  const elapsedSinceFrame = frameTime - lastFrameTime;
+  if (elapsedSinceFrame < targetFrameInterval) {
+    return;
+  }
+
+  lastFrameTime = frameTime - (elapsedSinceFrame % targetFrameInterval);
+  renderedFrameCount += 1;
+
+  const motionScale = prefersReducedMotion ? 0.25 : 1;
+  const t = clock.getElapsedTime() * motionScale;
   const pulse = getAudioStrength();
 
   const mainPosition = mainWave.geometry.attributes.position;
@@ -262,9 +330,11 @@ function animate() {
   glowPosition.needsUpdate = true;
   veilPosition.needsUpdate = true;
   colorAttribute.needsUpdate = true;
-  mainWave.geometry.computeVertexNormals();
-  glowWave.geometry.computeVertexNormals();
-  veilWave.geometry.computeVertexNormals();
+  if (renderedFrameCount % 2 === 0) {
+    mainWave.geometry.computeVertexNormals();
+    glowWave.geometry.computeVertexNormals();
+    veilWave.geometry.computeVertexNormals();
+  }
 
   stars.rotation.y += 0.0011 + pulse * 0.005;
   stars.rotation.x = Math.sin(t * 0.2) * 0.06;
@@ -300,6 +370,8 @@ animate();
 
 async function setupAudioSource(type) {
   const isMicrophone = type === "microphone";
+  let pendingStream;
+  let pendingSourceNode;
 
   setControlBusyState(true);
   statusText.textContent = isMicrophone ? "Requesting microphone permission…" : "Select a screen/tab and enable audio sharing…";
@@ -309,10 +381,14 @@ async function setupAudioSource(type) {
       throw new Error("Audio capture requires HTTPS (or localhost). Open this page from a secure origin.");
     }
 
-    const stream = isMicrophone ? await requestMicrophoneStream() : await requestDeviceAudioStream();
-
     if (!AudioContextClass) {
       throw new Error("Web Audio API is unavailable in this browser.");
+    }
+
+    pendingStream = isMicrophone ? await requestMicrophoneStream() : await requestDeviceAudioStream();
+
+    if (!pendingStream.getAudioTracks().length) {
+      throw new Error("The selected source did not provide an audio track.");
     }
 
     if (!audioContext) {
@@ -323,23 +399,25 @@ async function setupAudioSource(type) {
       await audioContext.resume();
     }
 
-    if (!isMicrophone && !stream.getAudioTracks().length) {
-      stream.getTracks().forEach((track) => track.stop());
-      throw new Error("No audio track was shared.");
-    }
+    const pendingAnalyser = audioContext.createAnalyser();
+    pendingAnalyser.fftSize = 512;
+    pendingAnalyser.smoothingTimeConstant = 0.78;
+
+    pendingSourceNode = audioContext.createMediaStreamSource(pendingStream);
+    pendingSourceNode.connect(pendingAnalyser);
+
+    const stream = pendingStream;
 
     stopActiveStream();
 
     activeAudioStream = stream;
-    activeInputType = type;
-    setActiveButtonText();
-
-    activeSourceNode = audioContext.createMediaStreamSource(stream);
-    analyser = audioContext.createAnalyser();
-    analyser.fftSize = 512;
-    analyser.smoothingTimeConstant = 0.78;
+    activeSourceNode = pendingSourceNode;
+    analyser = pendingAnalyser;
     frequencyData = new Uint8Array(analyser.frequencyBinCount);
-    activeSourceNode.connect(analyser);
+    activeInputType = type;
+    pendingStream = undefined;
+    pendingSourceNode = undefined;
+    setActiveButtonText();
 
     const activeLabel = isMicrophone ? "Microphone" : "Device audio";
     statusText.textContent = `${activeLabel} active. Sound now drives the aurora wave and text glow.`;
@@ -348,7 +426,6 @@ async function setupAudioSource(type) {
       track.addEventListener("ended", () => {
         if (activeAudioStream === stream) {
           stopActiveStream();
-          activeInputType = undefined;
           setActiveButtonText();
           statusText.textContent = `${activeLabel} capture ended. Choose an input to start again.`;
         }
@@ -357,11 +434,11 @@ async function setupAudioSource(type) {
   } catch (error) {
     const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
     const iosHint = isIOS ? " On iPhone, use Safari and verify audio permissions for this site." : "";
-    const modeHint = isMicrophone
-      ? "Please allow microphone access and try again."
-      : "Share a tab/screen with audio enabled, then try again.";
+    const retainedInputHint = activeInputType ? " Your existing audio input remains active." : "";
 
-    statusText.textContent = `${isMicrophone ? "Microphone" : "Device audio"} unavailable. ${modeHint}${iosHint}`;
+    pendingSourceNode?.disconnect();
+    stopStream(pendingStream);
+    statusText.textContent = `${getAudioErrorMessage(error, isMicrophone)}${iosHint}${retainedInputHint}`;
     console.error(`${isMicrophone ? "Microphone" : "Device audio"} setup failed`, error);
   } finally {
     setControlBusyState(false);
@@ -369,16 +446,38 @@ async function setupAudioSource(type) {
   }
 }
 
+function toggleAudioSource(type) {
+  if (activeInputType === type) {
+    const activeLabel = type === "microphone" ? "Microphone" : "Device audio";
+    stopActiveStream();
+    setActiveButtonText();
+    statusText.textContent = `${activeLabel} stopped. Choose an input to start again.`;
+    return;
+  }
+
+  setupAudioSource(type);
+}
+
 microphoneBtn.addEventListener("click", () => {
-  setupAudioSource("microphone");
+  toggleAudioSource("microphone");
 });
 
 deviceAudioBtn.addEventListener("click", () => {
-  setupAudioSource("device");
+  toggleAudioSource("device");
 });
 
 window.addEventListener("resize", () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
+
+window.addEventListener("pagehide", () => {
+  stopActiveStream();
+  audioContext?.close();
+  audioContext = undefined;
+});
+
+setControlBusyState(false);
+setActiveButtonText();
