@@ -2,26 +2,55 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>RGB Flow Wave</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#082d53" />
+    <meta name="description" content="Turn live audio into an animated 3D wave and watch a tiny surfer ride it." />
+    <title>Swell — surf your sound</title>
+    <link rel="preconnect" href="https://unpkg.com" />
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
     <main>
-      <canvas id="scene"></canvas>
-      <section class="hud">
-        <h1 id="title">Aurora Sound Wave</h1>
-        <p>
-          Connect a microphone or capture tab/system audio to drive the aurora palette with any sound source.
-        </p>
-        <div class="controls" role="group" aria-label="Audio input options">
-          <button id="microphoneBtn">Enable Microphone</button>
-          <button id="deviceAudioBtn">Capture Device Audio</button>
-        </div>
-        <p id="status" role="status" aria-live="polite">Waiting to start…</p>
-      </section>
-    </main>
+      <canvas id="scene" aria-label="An animated 3D ocean wave with a cartoon surfboard"></canvas>
 
+      <header class="topbar">
+        <a class="brand" href="#" aria-label="Swell home">
+          <span class="brand-mark" aria-hidden="true">〰</span>
+          <span>SWELL</span>
+        </a>
+        <span class="live-pill"><i></i> Live audio visualizer</span>
+      </header>
+
+      <section class="hero" aria-labelledby="title">
+        <p class="eyebrow">Your sound. Your wave.</p>
+        <h1 id="title">Hear it.<br /><em>Ride it.</em></h1>
+        <p class="intro">Turn whatever you’re listening to into an endless ocean. Every beat builds the swell, and our little boarder hangs on for the ride.</p>
+
+        <div class="controls" aria-label="Choose an audio source">
+          <button class="source-button primary" id="microphoneBtn" type="button">
+            <span class="button-icon" aria-hidden="true">●</span>
+            <span><strong>Use microphone</strong><small>Music, voice &amp; the room around you</small></span>
+          </button>
+          <button class="source-button secondary" id="deviceAudioBtn" type="button">
+            <span class="button-icon screen-icon" aria-hidden="true">▣</span>
+            <span><strong>Share device audio</strong><small>Choose a tab or screen with audio</small></span>
+          </button>
+        </div>
+
+        <div class="status" id="status" role="status" aria-live="polite">
+          <span class="status-dot"></span>
+          <span id="statusText">Pick a source to make some waves</span>
+        </div>
+      </section>
+
+      <aside class="meter-card" aria-label="Live sound levels">
+        <div class="meter-heading"><span>Wave energy</span><strong id="energyLabel">CALM</strong></div>
+        <div class="meter" id="meter" aria-hidden="true"></div>
+        <div class="meter-scale"><span>LOW</span><span>HIGH</span></div>
+      </aside>
+
+      <p class="privacy"><span aria-hidden="true">◇</span> Audio stays in your browser. Nothing is recorded.</p>
+    </main>
     <script type="module" src="app.js"></script>
   </body>
 </html>
