@@ -14,10 +14,9 @@ const meterBars = [...meter.children];
 
 const scene = new THREE.Scene();
 scene.fog = new THREE.Fog(0x0a4861, 11, 30);
-const camera = new THREE.PerspectiveCamera(42, innerWidth / innerHeight, 0.1, 80);
-camera.position.set(5.8, 3.5, 10.5);
+const camera = new THREE.PerspectiveCamera(38, 1, 0.1, 80);
+camera.position.set(3.4, 3.2, 12.5);
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
-renderer.setSize(innerWidth, innerHeight);
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -28,14 +27,14 @@ const sun = new THREE.DirectionalLight(0xfff0b0, 3.8);
 sun.position.set(-5, 8, 7);
 scene.add(sun);
 
-const waveGeometry = new THREE.PlaneGeometry(18, 15, 100, 70);
+const waveGeometry = new THREE.PlaneGeometry(34, 13, 150, 60);
 waveGeometry.rotateX(-Math.PI / 2);
 const original = Float32Array.from(waveGeometry.attributes.position.array);
 const wave = new THREE.Mesh(waveGeometry, new THREE.MeshPhysicalMaterial({
   color: 0x10a89f, roughness: 0.25, metalness: 0.05, transmission: 0.05,
   clearcoat: 0.75, clearcoatRoughness: 0.18, side: THREE.DoubleSide,
 }));
-wave.position.set(2.2, -2.1, -1.5);
+wave.position.set(0, -2.15, -1.5);
 scene.add(wave);
 
 const wire = new THREE.Mesh(waveGeometry, new THREE.MeshBasicMaterial({ color: 0x9affde, wireframe: true, transparent: true, opacity: 0.09 }));
@@ -72,14 +71,15 @@ for (const [x, rotation] of [[-0.36, -0.58], [0.36, 0.58]]) {
   rider.add(limb);
 }
 board.add(rider);
-board.position.set(3.1, 0.5, 0.4);
-board.rotation.set(-0.05, -0.3, -0.15);
+board.position.set(2.2, 0.5, 0.15);
+board.rotation.set(-0.05, -0.08, -0.15);
+board.scale.setScalar(1.25);
 scene.add(board);
 
 const foam = new THREE.Group();
 for (let i = 0; i < 65; i += 1) {
   const dot = new THREE.Mesh(new THREE.SphereGeometry(0.025 + Math.random() * 0.06, 6, 6), new THREE.MeshBasicMaterial({ color: 0xd9fff1, transparent: true, opacity: 0.35 + Math.random() * 0.55 }));
-  dot.position.set(2 + Math.random() * 6, -0.1 + Math.random() * 2.7, -2 + Math.random() * 1.1);
+  dot.position.set(-3 + Math.random() * 13, -0.1 + Math.random() * 2.7, -2 + Math.random() * 1.1);
   foam.add(dot);
 }
 scene.add(foam);
@@ -167,9 +167,9 @@ function animate() {
     const x = original[p];
     const z = original[p + 2];
     const band = analyser ? frequencyData[i % frequencyData.length] / 255 : 0;
-    const rolling = Math.sin(z * 1.05 + time * 1.45) * (0.34 + smoothEnergy * 1.8);
-    const crest = Math.exp(-Math.pow(z + 1.3, 2) * 0.42) * (1.45 + smoothEnergy * 3.5);
-    const texture = Math.sin(x * 1.7 + z * 1.25 + time * 2.1) * (0.08 + band * 0.2);
+    const rolling = Math.sin(x * 0.72 - time * 1.65) * (0.34 + smoothEnergy * 1.8);
+    const crest = Math.exp(-Math.pow(x - 2.2, 2) * 0.3) * (1.45 + smoothEnergy * 3.5);
+    const texture = Math.sin(x * 1.7 + z * 1.25 - time * 2.1) * (0.08 + band * 0.2);
     position.array[p + 1] = original[p + 1] + rolling + crest + texture;
   }
   position.needsUpdate = true;
@@ -178,8 +178,11 @@ function animate() {
   board.rotation.z = -0.12 + Math.sin(time * 1.45) * 0.12;
   board.rotation.x = -0.04 + Math.cos(time * 1.45) * 0.08;
   rider.rotation.z = Math.sin(time * 1.45 + 0.5) * 0.08;
-  foam.rotation.y = Math.sin(time * 0.2) * 0.08;
-  foam.children.forEach((dot, index) => { dot.position.y += Math.sin(time * 2 + index) * 0.0008; });
+  foam.children.forEach((dot, index) => {
+    dot.position.x -= 0.018 + smoothEnergy * 0.025;
+    if (dot.position.x < -5) dot.position.x = 10;
+    dot.position.y += Math.sin(time * 2 + index) * 0.0008;
+  });
   const visibleBars = Math.round(smoothEnergy * meterBars.length * 2.3);
   meterBars.forEach((bar, index) => {
     const active = index <= Math.max(1, visibleBars);
@@ -189,13 +192,16 @@ function animate() {
   });
   energyLabel.textContent = smoothEnergy > 0.32 ? "WILD" : smoothEnergy > 0.16 ? "RISING" : activeType ? "CRUISING" : "CALM";
   camera.position.y = 3.5 + Math.sin(time * 0.18) * 0.15;
-  camera.lookAt(1.8, 0.2, -1);
+  camera.lookAt(2.1, 0.15, -1);
   renderer.render(scene, camera);
 }
 animate();
 
-addEventListener("resize", () => {
-  camera.aspect = innerWidth / innerHeight;
+function resizeScene() {
+  const { clientWidth, clientHeight } = canvas;
+  camera.aspect = clientWidth / clientHeight;
   camera.updateProjectionMatrix();
-  renderer.setSize(innerWidth, innerHeight);
-});
+  renderer.setSize(clientWidth, clientHeight, false);
+}
+resizeScene();
+addEventListener("resize", resizeScene);
